@@ -1,0 +1,612 @@
+---
+title: "Visually exploring local explanations to understand complex machine learning models"
+author: '<br><br>Professor Di Cook <br> <span style="font-size: 70%;"> Econometrics and Business Statistics </span><br> <span style="font-size: 70%;"> Monash University </span>'
+format: 
+  revealjs:
+    multiplex: false
+    footer: "[https://github.com/dicook/ASC_2023](https://github.com/dicook/ASC_2023)"
+    theme: ["serif", "mystyle.scss"]
+    slide-number: c/t
+    incremental: false
+    controls: false
+    title-slide-attributes:
+      data-background-image: img/penguins_bg.png
+      data-background-size: 90%  
+      data-background-position: 30% 45%  
+---
+
+```{r setup}
+#| include: false
+
+library(knitr)
+options(htmltools.dir.version = FALSE, tibble.width = 45)
+opts_chunk$set(
+  echo = FALSE, 
+  warning = FALSE, 
+  message = FALSE, 
+  error=FALSE, 
+  comment = "#>",
+  fig.align = 'center', 
+  fig.width = 4, 
+  fig.height = 4, 
+  out.width = "100%",
+  fig.show = 'hold', 
+  fig.retina = 5,
+  cache = FALSE
+)
+
+# libraries
+library(tidyverse)
+library(ggthemes)
+
+# for fonts
+library(showtext)
+font_add_google("Noto Sans", "Noto Sans")
+showtext_auto()
+theme_set(theme_minimal(base_family = "Noto Sans") +
+  theme(axis.line = element_line(colour = "black", size=0.2),
+        panel.border = element_rect(
+          colour = "black", fill = NA, size=0.5)))
+# Set colour palette to brewer::Dark2
+```
+
+## Outline
+
+<!--
+-   Example data: penguins
+-   Tours: visualising high-dimensions with linear projections
+-   XAI and local explanations
+-   Demo
+-->
+
+- Example data: penguins
+- Non-linear model
+- Local explanations
+- Radial tour, focus on single observation
+
+## Palmer penguins {background-image="https://allisonhorst.github.io/palmerpenguins/logo.png" background-size="100px" background-position="96% 1%"}
+
+```{r}
+library(DT)
+library(GGally)
+options(digits=2)
+```
+
+```{r eval=FALSE}
+datatable(penguins, options = list(pageLength = 5))
+```
+
+::: aside 
+See [Allison Horst's web site on the penguins data](https://allisonhorst.github.io/palmerpenguins/) for more details.
+:::
+
+:::: {.columns}
+::: {.column width=50%}
+```{r echo=TRUE}
+library(palmerpenguins)
+penguins <- penguins %>%
+  na.omit() # 11 observations 
+# out of 344 removed, use only 
+# vars of interest, and standardise
+# them for easier interpretation
+penguins_sub <- penguins[,c(1, 3:6)] %>% 
+  mutate(
+    across(where(is.numeric),  ~ scale(.)[,1])) %>%
+  rename(bl = bill_length_mm,
+         bd = bill_depth_mm,
+         fl = flipper_length_mm,
+         bm = body_mass_g)
+```
+:::
+::: {.column width=50%}
+```{r}
+#| fig-width: 6
+#| fig-height: 7
+#| fig-align: center
+#| out-width: 100%
+ggscatmat(penguins_sub, 
+          columns = 2:5,
+          color = "species",
+          alpha=0.8) +
+  scale_color_brewer("", palette="Dark2") +
+  theme(legend.position = "bottom",
+        legend.direction = "horizontal")
+```
+:::
+::::
+## Examine the penguins using a tour 
+
+```{r eval=FALSE}
+library(tourr)
+library(RColorBrewer)
+source("display_dist_col.R")
+clrs <- brewer.pal(3, "Dark2")[as.integer(penguins_sub$species)]
+# To run the tour interactively
+set.seed(1120)
+animate_xy(penguins_sub[,2:5], 
+           col = clrs, 
+           axes = "bottomleft")
+# Adelie - green; Chinstrap - orange; Gentoo - purple
+pp <- animate_xy(penguins_sub[,2:5], 
+           tour_path = guided_tour(
+             lda_pp(penguins_sub$species)),
+           col = clrs, 
+           axes = "bottomleft")
+save(pp, file="data/penguins_pp.rda")
+# To create an animated gif
+set.seed(1120)
+render_gif(data=penguins_sub[,2:5], 
+           tour_path = grand_tour(), 
+           display = display_xy(
+             col = clrs, 
+             axes = "bottomleft"),
+           gif_file = "penguins_gt.gif",
+           apf = 1/25, 
+           frames = 300, 
+           width = 300, height = 300,
+           loop = FALSE)
+render_gif(data=penguins_sub[,2:5], 
+           tour_path = guided_tour(
+             lda_pp(penguins_sub$species)), 
+           display = display_xy(
+             col = clrs, 
+             axes = "bottomleft"),
+           gif_file = "penguins_pp.gif",
+           apf = 1/25, 
+           frames = 150, 
+           width = 300, height = 300,
+           loop = FALSE)
+```
+
+::: {.column width="45%"}
+
+**Grand tour**: randomly selecting target planes
+
+![](penguins_gt.gif){width="100%" height="100%"}
+:::
+
+::: {.column width="5%"}
+:::
+
+::: {.column width="45%"}
+
+<br>
+<br>
+<br>
+<br>
+<br>
+<p style="color: #1B9E77"> Adelie </p>
+<p style="color: #D95F02"> Chinstrap </p>
+<p style="color: #7570B3"> Gentoo </p>
+
+
+:::
+## Examine the penguins using a tour 
+
+
+::: {.column width="45%"}
+
+**Grand tour**: randomly selecting target planes
+
+![](img/penguins_gt.png){width="100%" height="100%"}
+:::
+
+::: {.column width="5%"}
+:::
+
+::: {.column width="45%"}
+
+**Guided tour**: target planes chosen to best separate classes
+
+![](penguins_pp.gif){width="100%"  height="100%"}
+:::
+
+## Tour projections are biplots
+
+::: {.column width="45%"}
+
+![](img/penguins_pp.png){width="100%"  height="100%"}
+
+:::
+
+::: {.column width="5%"}
+:::
+
+::: {.column width="45%"}
+
+`bd` and `bm` distinguish <strong style="color: #7570B3"> Gentoo </strong> 
+
+```{r}
+ggplot(penguins_sub, aes(x=bd, y=bm, colour=species)) +
+  geom_point(size=2, alpha=0.8) +
+  scale_colour_brewer("", palette="Dark2") +
+  theme(aspect.ratio=1, legend.position = "none") 
+```
+
+:::
+
+## Tour projections are biplots
+
+::: {.column width="45%"}
+
+![](img/penguins_pp.png){width="100%"  height="100%"}
+
+:::
+
+::: {.column width="5%"}
+:::
+
+::: {.column width="45%"}
+
+`bd` and `fl` also distinguish <strong style="color: #7570B3"> Gentoo </strong>  
+
+```{r}
+ggplot(penguins_sub, aes(x=bd, y=fl, colour=species)) +
+  geom_point(size=2, alpha=0.8) +
+  scale_colour_brewer("", palette="Dark2") +
+  theme(aspect.ratio=1, legend.position = "none") 
+```
+
+:::
+
+## Tour projections are biplots
+
+::: {.column width="45%"}
+
+![](img/penguins_pp.png){width="100%"  height="100%"}
+
+:::
+
+::: {.column width="5%"}
+:::
+
+::: {.column width="45%"}
+
+`bd` and `bl` distinguish <strong style="color: #D95F02"> Chinstrap </strong> from <strong style="color: #1B9E77"> Adelie </strong>
+
+```{r}
+ggplot(penguins_sub, aes(x=bd, y=bl, colour=species)) +
+  geom_point(size=2, alpha=0.8) +
+  scale_colour_brewer("", palette="Dark2") +
+  theme(aspect.ratio=1, legend.position = "none") 
+```
+
+:::
+
+## Fit a classification model 
+
+```{r echo=TRUE}
+library(randomForest)
+set.seed(2311)
+penguins_rf_cl <- randomForest(species~., penguins_sub, 
+                            ntree = 1000,
+                            importance = TRUE)
+```
+
+<br>
+
+```{r}
+penguins_rf_cl
+```
+
+## Variable importance (globally)
+
+```{r}
+penguins_rf_cl$importance
+```
+
+::: {.column width="45%"}
+Globally, `bl`, `fl` are most important, and to a lesser extent, `bd` and even lesser extent `bm`. <text style="color:#aec7b2"> (Note: one needs to play with sign.) </text>
+
+```{r echo=TRUE}
+lin1 <- penguins_rf_cl$importance[,4]/
+           sqrt(sum(penguins_rf_cl$importance[,4]^2))
+# Flip sign of one
+lin1[2] <- -lin1[2]
+proj1 <- as.matrix(penguins_sub[,-1])%*%as.matrix(lin1)
+penguins_pred <- penguins_sub %>% 
+  mutate(proj1=proj1)
+```
+:::
+
+::: {.column width="5%"}
+:::
+
+::: {.column width="45%"}
+```{r}
+ggplot(penguins_pred, aes(x=proj1, fill=species)) +
+  geom_density(colour="black", alpha=0.7) +
+  scale_fill_brewer("", palette="Dark2") +
+  theme(legend.position = "none")
+```
+:::
+
+## Variable importance (by class)
+
+
+```{r}
+penguins_rf_cl$importance
+```
+
+::: {.column width="30%"}
+```{r}
+lin2a <- penguins_rf_cl$importance[,1]/
+           sqrt(sum(penguins_rf_cl$importance[,1]^2))
+lin2b <- penguins_rf_cl$importance[,2]/
+           sqrt(sum(penguins_rf_cl$importance[,2]^2))
+lin2c <- penguins_rf_cl$importance[,3]/
+           sqrt(sum(penguins_rf_cl$importance[,3]^2))
+# Flip sign of one
+lin2c[2] <- -lin2c[2]
+#lin2 <- tourr:::orthonormalise(cbind(lin2a, lin2b))
+proj2a <- as.matrix(penguins_sub[,-1])%*%as.matrix(lin2a)
+proj2b <- as.matrix(penguins_sub[,-1])%*%as.matrix(lin2b)
+proj2c <- as.matrix(penguins_sub[,-1])%*%as.matrix(lin2c)
+penguins_pred <- penguins_sub %>% 
+  mutate(proj2a=proj2a, proj2b=proj2b, proj2c=proj2c)
+ggplot(filter(penguins_pred, species != "Gentoo"), 
+       aes(x=proj2a, fill=species)) +
+  geom_density(colour="black", alpha=0.7) +
+  scale_fill_brewer("", palette="Dark2") +
+  theme(legend.position = "none") +
+  ggtitle("Adelie")
+```
+:::
+
+::: {.column width="30%"}
+```{r}
+ggplot(filter(penguins_pred, species != "Gentoo"), 
+       aes(x=proj2b, fill=species)) +
+  geom_density(colour="black", alpha=0.7) +
+  scale_fill_brewer("", palette="Dark2") +
+  theme(legend.position = "none") +
+  ggtitle("Chinstrap")
+```
+:::
+
+::: {.column width="30%"}
+```{r}
+ggplot(penguins_pred, aes(x=proj2c, fill=species)) +
+  geom_density(colour="black", alpha=0.7) +
+  scale_fill_brewer("", palette="Dark2") +
+  theme(legend.position = "none") +
+  ggtitle("Gentoo")
+```
+:::
+
+<text style="color:#aec7b2"> Note: one still needs to play with sign.</text>
+
+## Radial tours: `bd` is very important
+
+```{r eval=FALSE}
+clrs <- brewer.pal(3, "Dark2")[as.integer(penguins_sub$species)]
+animate_dist_cl(penguins_sub[,-1], 
+             radial_tour(as.matrix(lin2c), mvar = 3), 
+             col = clrs, alpha=0.7)
+render_gif(data=penguins_sub[,2:5],
+           tour_path = radial_tour(as.matrix(lin2c), mvar = 2),
+           display = display_dist_cl(col = clrs),
+           gif_file = "penguins_rt_bd.gif",
+           apf = 1/70, 
+           frames = 100, 
+           width = 300, height = 300)
+
+render_gif(data=penguins_sub[,2:5],
+           tour_path = radial_tour(as.matrix(lin2c), mvar = 3),
+           display = display_dist_cl(col = clrs),
+           gif_file = "penguins_rt_fl.gif",
+           apf = 1/70, 
+           frames = 100, 
+           width = 300, height = 300)
+
+render_gif(data=penguins_sub[,2:5],
+           tour_path = radial_tour(as.matrix(lin2c), mvar = 1),
+           display = display_dist_cl(col = clrs),
+           gif_file = "penguins_rt_bl.gif",
+           apf = 1/70, 
+           frames = 100, 
+           width = 300, height = 300)
+
+```
+::: {.column width="45%"}
+A radial tour changes the contribution for one variable, reducing it to 0, and then back to original.
+
+At right, coefficient for `bd` is being changed.
+
+When it is 0, gap between <strong style="color: #7570B3"> Gentoo </strong> and others is smaller, implying that `bd` is very important.
+
+:::
+
+::: {.column width="45%"}
+
+
+![](penguins_rt_bd.gif){width="100%" height="100%"}
+:::
+
+## but `bl` is less important
+
+::: {.column width="45%"}
+
+At right, the small contribution for `bl` is reduced to zero, which does not change the gap between <strong style="color: #7570B3"> Gentoo </strong> and others. 
+
+Thus `bl` can be removed from the projection, to make a simpler but equally effective combination of variables. 
+
+:::
+
+::: {.column width="45%"}
+
+
+![](penguins_rt_bl.gif){width="100%" height="100%"}
+:::
+
+
+## Local explanations
+
+Explainable Artificial Intelligence (XAI) is an emerging field of research that provides methods for the interpreting of black box models^[[Adadi and Berrada 2018](https://ieeexplore.ieee.org/document/8466590); [Arrieta et al. 2020](https://www.sciencedirect.com/science/article/abs/pii/S1566253519308103)]. 
+
+A common approach is to use <strong style="color:#aec7b2"> local explanations</strong>, which attempt to approximate linear variable importance in the neighbourhood each observation.
+
+::: {.column width="40%"}
+Fitted model may be highly nonlinear. Overall linear projection will not accurately represent the fit in all subspaces. 
+:::
+
+::: {.column width="5%"}
+:::
+
+
+::: {.column width="40%"}
+![](img/penguins_pp_le.png){width="70%" height="70%"}
+:::
+
+## Compute SHAP values
+
+::: {.column width="80%"}
+
+```{r}
+penguins_Y <- as.integer(penguins_sub$species) # BAD IDEA generally
+penguins_rf <- randomForest(x=penguins_sub[,2:5], 
+                            y=penguins_Y, 
+                            maxnodes = 10, 
+                            ntree = 500,
+                            importance = TRUE)
+```
+
+```{r}
+library(treeshap)
+unified_model <- randomForest.unify(penguins_rf, penguins_sub[,2:5])
+penguins_pred <- penguins_sub %>%
+  mutate(pred = penguins_rf$predicted) %>%
+  mutate(pspecies = round(pred, 0)) %>%
+  mutate(pspecies = factor(pspecies, 
+       labels=c("Adelie", "Chinstrap", "Gentoo")))
+```
+
+```{r echo=FALSE}
+penguins_shaps <- treeshap(unified_model,
+                           penguins_sub[,2:5],
+                           verbose=FALSE)
+penguins_shaps <- bind_cols(
+  penguins_pred[,c(1, 7)], 
+  penguins_shaps$shaps)
+datatable(penguins_shaps, options = list(pageLength = 5)) %>%
+    formatRound(columns=c('bl', 'bd', 'fl', 'bm'), digits=3)
+```
+
+```{r eval=FALSE}
+# Find an interesting misclassification
+penguins_pred <- penguins_pred %>%
+  mutate(correct = ifelse(species == pspecies, "yes", "no"))
+# plot_contribution(penguins_shaps, obs = 15)
+
+# Intercept: check
+# mean_prediction <- mean(penguins_rf$predicted)
+
+```
+:::
+::: {.column width="3%"}
+:::
+::: {.column width="15%"}
+
+<br>
+Each observation has a variable importance, computed using the SHAP method, see [Molnar (2022) Interpretable Machine Learning](https://christophm.github.io/interpretable-ml-book/shap.html).
+
+
+:::
+
+
+
+## Comparing all local explanations
+
+::: {.column width="50%"}
+
+```{r}
+library(GGally)
+ggparcoord(penguins_shaps, columns=3:6, 
+           groupColumn = 1, alphaLines=0.7) +
+  scale_colour_brewer("", palette="Dark2") +
+  theme(legend.position = "none") +
+  ylab("SHAP")
+```
+
+:::
+
+::: {.column width="5%"}
+:::
+
+::: {.column width="40%"}
+<strong style="color:#aec7b2"> SHAP </strong> examines predictions while varying one variable and holding others fixed at mean.
+
+Observations with different local explanations from the rest of their group are likely the misclassified cases. 
+
+And from the parallel coordinate plot can be seen which variables are most contributing to this.
+:::
+
+## Using R package [cheem](https://nspyrison.github.io/cheem/)
+
+<strong style="color: #7570B3"> Gentoo </strong> penguin, mistaken as a <strong style="color: #D95F02"> Chinstrap</strong>, model used small component of `fl`, unlike the other Gentoo but more like the bulk of the Chinstrap penguins. That was a mistake! 
+
+<center>
+![](img/penguins_cheem1.png){width="70%"}
+</center>
+
+::: {.aside}
+Shiny app: [https://ebsmonash.shinyapps.io/cheem_initial/](https://ebsmonash.shinyapps.io/cheem_initial/)
+:::
+
+## What we learn
+
+
+::: {.column width="45%"}
+
+```{r out.width="80%", fig.width=3, fig.height=3}
+ggplot(penguins_sub, aes(x=bl, y=fl, colour=species)) +
+  geom_point(alpha=0.8) +
+  geom_point(data=penguins_sub[243,], 
+             shape=4, size=4, alpha=0.6,
+             colour="black") +
+  scale_colour_brewer("", palette="Dark2") +
+  theme(aspect.ratio=1, legend.position = "none") 
+```
+With `fl` it looks more like a Chinstrap.
+
+:::
+
+::: {.column width="5%"}
+:::
+
+::: {.column width="45%"}
+```{r out.width="80%", fig.width=3, fig.height=3}
+ggplot(penguins_sub, aes(x=bl, y=bd, colour=species)) +
+  geom_point(alpha=0.8) +
+  geom_point(data=penguins_sub[243,], 
+             shape=4, size=4, alpha=0.6,
+             colour="black") +
+  scale_colour_brewer("", palette="Dark2") +
+  theme(aspect.ratio=1, legend.position = "none") 
+```
+
+With only `bl` and `bd` it looks like it's own species.
+:::
+
+## Summary
+
+<br><br>
+
+- Local explanations tell us how a prediction is constructed, for any observation.
+- User-controlled, interactive radial tours are useful to check the local explanations, and better understand a model fit in local neighbourhoods.
+
+## Further reading
+
+This work is based on Nick Spyrison's PhD research, developed after discussions with Przemyslaw Biecek.
+
+-   [Spyrison, Cook, Biecek (2022)](https://arxiv.org/abs/2205.05359) Exploring Local Explanations of Nonlinear Models Using Animated Linear Projections
+-   [R package: cheem](https://nspyrison.github.io/cheem/) and [shiny app for experimenting](https://ebsmonash.shinyapps.io/cheem_initial/).
+- [Wickham, Cook, Hofmann (2015) ](https://onlinelibrary.wiley.com/doi/10.1002/sam.11271) Visualizing statistical models: Removing the blindfold.
+
+## Acknowledgements
+
+Slides produced using [quarto](https://quarto.org).
+
+Slides available from <https://github.com/dicook/ASC_2023>.
+
+Viewable at [https://github.com/dicook/ASC_2023/slides.html](https://github.com/dicook/ASC_2023/slides.html).
